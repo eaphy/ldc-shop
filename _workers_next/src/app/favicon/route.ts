@@ -18,10 +18,29 @@ export async function GET(request: Request) {
     ? target
     : new URL(target, request.url).toString();
 
-  return NextResponse.redirect(url, {
-    status: 302,
-    headers: {
-      "Cache-Control": "public, max-age=300",
-    },
-  });
+  try {
+    const res = await fetch(url, { cache: "no-store" });
+    if (!res.ok) throw new Error("fetch_failed");
+    const contentType = res.headers.get("content-type") || "image/png";
+    const body = await res.arrayBuffer();
+    return new NextResponse(body, {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=86400, stale-while-revalidate=3600",
+      },
+    });
+  } catch {
+    const fallbackUrl = new URL("/icon.svg", request.url).toString();
+    const fallbackRes = await fetch(fallbackUrl, { cache: "force-cache" });
+    const contentType = fallbackRes.headers.get("content-type") || "image/svg+xml";
+    const body = await fallbackRes.arrayBuffer();
+    return new NextResponse(body, {
+      status: 200,
+      headers: {
+        "Content-Type": contentType,
+        "Cache-Control": "public, max-age=86400, stale-while-revalidate=3600",
+      },
+    });
+  }
 }

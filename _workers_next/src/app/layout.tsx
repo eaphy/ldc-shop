@@ -14,16 +14,27 @@ const DEFAULT_TITLE = "LDC Virtual Goods Shop";
 const DEFAULT_DESCRIPTION = "High-quality virtual goods, instant delivery";
 const THEME_HUES: Record<string, number> = {
   purple: 270,
+  indigo: 255,
   blue: 240,
   cyan: 200,
+  teal: 170,
   green: 150,
+  lime: 120,
+  amber: 85,
   orange: 45,
   red: 25,
-  pink: 330, // legacy
+  rose: 345,
+  pink: 330,
   black: 0,
 };
 const THEME_CHROMA: Record<string, number> = {
   black: 0,
+};
+const THEME_PRIMARY_L: Record<string, number> = {
+  black: 0.2,
+};
+const THEME_PRIMARY_DARK_L: Record<string, number> = {
+  black: 0.8,
 };
 
 export async function generateMetadata(): Promise<Metadata> {
@@ -83,12 +94,19 @@ export default async function RootLayout({
   }
   const themeHue = THEME_HUES[themeColor || "purple"] || 270;
   const themeChroma = THEME_CHROMA[themeColor || "purple"] ?? 1;
+  const themePrimaryL = THEME_PRIMARY_L[themeColor || "purple"] ?? 0.45;
+  const themePrimaryDarkL = THEME_PRIMARY_DARK_L[themeColor || "purple"] ?? 0.7;
 
   return (
     <html
       lang="en"
       suppressHydrationWarning
-      style={{ ["--theme-hue" as any]: themeHue, ["--theme-chroma" as any]: themeChroma }}
+      style={{
+        ["--theme-hue" as any]: themeHue,
+        ["--theme-chroma" as any]: themeChroma,
+        ["--theme-primary-l" as any]: themePrimaryL,
+        ["--theme-primary-dark-l" as any]: themePrimaryDarkL,
+      }}
     >
       <body className={cn("min-h-screen bg-background font-sans antialiased", inter.className)}>
         <Providers themeColor={themeColor}>

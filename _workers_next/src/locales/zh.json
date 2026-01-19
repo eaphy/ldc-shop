@@ -233,14 +233,19 @@
             "themeColor": {
                 "title": "主题颜色",
                 "hint": "选择商店的主色调",
+                "black": "黑色",
                 "purple": "紫色（默认）",
+                "indigo": "靛蓝",
                 "blue": "蓝色",
                 "cyan": "青色",
+                "teal": "青绿",
                 "green": "绿色",
+                "lime": "青柠",
+                "amber": "琥珀",
                 "orange": "橙色",
-                "pink": "粉色",
                 "red": "红色",
-                "black": "黑色"
+                "rose": "玫瑰",
+                "pink": "粉色"
             },
             "notifications": {
                 "title": "通知设置",

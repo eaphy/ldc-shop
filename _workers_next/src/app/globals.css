@@ -54,6 +54,8 @@
   --radius: 0.75rem;
   --theme-hue: 270;
   --theme-chroma: 1;
+  --theme-primary-l: 0.45;
+  --theme-primary-dark-l: 0.7;
 
   /* Base Colors - Clean & Minimal */
   --background: oklch(0.99 0 0);
@@ -68,7 +70,7 @@
   --popover-foreground: oklch(0.15 0.02 270);
 
   /* Primary - Tech Blue-Purple */
-  --primary: oklch(0.45 calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
+  --primary: oklch(var(--theme-primary-l, 0.45) calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
   --primary-foreground: oklch(0.99 0 0);
 
   /* Secondary - Themed tint */
@@ -89,7 +91,7 @@
   /* Borders - Subtle */
   --border: oklch(0.92 calc(0.02 * var(--theme-chroma, 1)) var(--theme-hue, 270));
   --input: oklch(0.92 calc(0.02 * var(--theme-chroma, 1)) var(--theme-hue, 270));
-  --ring: oklch(0.45 calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
+  --ring: oklch(var(--theme-primary-l, 0.45) calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
 
   /* Charts - Tech palette */
   --chart-1: oklch(0.55 calc(0.22 * var(--theme-chroma, 1)) var(--theme-hue, 270));
@@ -101,12 +103,12 @@
   /* Sidebar */
   --sidebar: oklch(0.98 0.01 270);
   --sidebar-foreground: oklch(0.15 0.02 270);
-  --sidebar-primary: oklch(0.45 calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
+  --sidebar-primary: oklch(var(--theme-primary-l, 0.45) calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
   --sidebar-primary-foreground: oklch(0.99 0 0);
   --sidebar-accent: oklch(0.94 calc(0.05 * var(--theme-chroma, 1)) var(--theme-hue, 270));
   --sidebar-accent-foreground: oklch(0.25 calc(0.12 * var(--theme-chroma, 1)) var(--theme-hue, 270));
   --sidebar-border: oklch(0.92 0.01 270);
-  --sidebar-ring: oklch(0.45 calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
+  --sidebar-ring: oklch(var(--theme-primary-l, 0.45) calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
 
   /* Tech Glow Colors */
   --glow-primary: oklch(0.55 calc(0.25 * var(--theme-chroma, 1)) var(--theme-hue, 270) / 0.3);
@@ -130,7 +132,7 @@
   --popover-foreground: oklch(0.95 0.01 270);
 
   /* Primary - Electric Blue-Purple */
-  --primary: oklch(0.7 calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
+  --primary: oklch(var(--theme-primary-dark-l, 0.7) calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
   --primary-foreground: oklch(0.12 0.02 270);
 
   /* Secondary */
@@ -151,7 +153,7 @@
   /* Borders - Glowing edges */
   --border: oklch(0.4 calc(0.06 * var(--theme-chroma, 1)) var(--theme-hue, 270) / 0.3);
   --input: oklch(0.25 calc(0.04 * var(--theme-chroma, 1)) var(--theme-hue, 270) / 0.8);
-  --ring: oklch(0.7 calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
+  --ring: oklch(var(--theme-primary-dark-l, 0.7) calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
 
   /* Charts */
   --chart-1: oklch(0.7 calc(0.22 * var(--theme-chroma, 1)) var(--theme-hue, 270));
@@ -163,12 +165,12 @@
   /* Sidebar */
   --sidebar: oklch(0.14 0.02 270 / 0.9);
   --sidebar-foreground: oklch(0.95 0.01 270);
-  --sidebar-primary: oklch(0.7 calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
+  --sidebar-primary: oklch(var(--theme-primary-dark-l, 0.7) calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
   --sidebar-primary-foreground: oklch(0.12 0.02 270);
   --sidebar-accent: oklch(0.65 calc(0.15 * var(--theme-chroma, 1)) var(--theme-hue, 270) / 0.3);
   --sidebar-accent-foreground: oklch(0.85 calc(0.1 * var(--theme-chroma, 1)) var(--theme-hue, 270));
   --sidebar-border: oklch(0.4 0.05 270 / 0.3);
-  --sidebar-ring: oklch(0.7 calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
+  --sidebar-ring: oklch(var(--theme-primary-dark-l, 0.7) calc(0.2 * var(--theme-chroma, 1)) var(--theme-hue, 270));
 
   /* Tech Glow Colors */
   --glow-primary: oklch(0.6 calc(0.25 * var(--theme-chroma, 1)) var(--theme-hue, 270) / 0.4);

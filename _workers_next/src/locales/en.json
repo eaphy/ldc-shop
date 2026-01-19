@@ -233,14 +233,19 @@
             "themeColor": {
                 "title": "Theme Color",
                 "hint": "Choose the primary color for your shop",
+                "black": "Black",
                 "purple": "Purple (Default)",
+                "indigo": "Indigo",
                 "blue": "Blue",
                 "cyan": "Cyan",
+                "teal": "Teal",
                 "green": "Green",
+                "lime": "Lime",
+                "amber": "Amber",
                 "orange": "Orange",
-                "pink": "Pink",
                 "red": "Red",
-                "black": "Black"
+                "rose": "Rose",
+                "pink": "Pink"
             },
             "notifications": {
                 "title": "Notification Settings",

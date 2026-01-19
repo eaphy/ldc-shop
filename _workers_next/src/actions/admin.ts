@@ -422,7 +422,7 @@ export async function saveShopFooter(footer: string) {
     revalidateTag('home:product-categories')
 }
 
-const VALID_THEME_COLORS = ['purple', 'blue', 'cyan', 'green', 'orange', 'pink', 'red', 'black']
+const VALID_THEME_COLORS = ['purple', 'indigo', 'blue', 'cyan', 'teal', 'green', 'lime', 'amber', 'orange', 'red', 'rose', 'pink', 'black']
 
 export async function saveThemeColor(color: string) {
     await checkAdmin()

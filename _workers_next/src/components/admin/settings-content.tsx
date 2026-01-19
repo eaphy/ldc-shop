@@ -45,13 +45,19 @@ interface UpdateInfo {
 }
 
 const THEME_COLORS = [
+    { value: 'black', hue: 0, chroma: 0, preview: 'oklch(0.18 0 0)' },
     { value: 'purple', hue: 270 },
+    { value: 'indigo', hue: 255 },
     { value: 'blue', hue: 240 },
     { value: 'cyan', hue: 200 },
+    { value: 'teal', hue: 170 },
     { value: 'green', hue: 150 },
+    { value: 'lime', hue: 120 },
+    { value: 'amber', hue: 85 },
     { value: 'orange', hue: 45 },
     { value: 'red', hue: 25 },
-    { value: 'black', hue: 0, chroma: 0, preview: 'oklch(0.18 0 0)' },
+    { value: 'rose', hue: 345 },
+    { value: 'pink', hue: 330 },
 ]
 
 export function AdminSettingsContent({ stats, shopName, shopDescription, shopLogo, shopFooter, themeColor, visitorCount, lowStockThreshold, checkinReward, checkinEnabled, noIndexEnabled, registryOptIn, registryEnabled }: AdminSettingsContentProps) {
@@ -78,9 +84,6 @@ export function AdminSettingsContent({ stats, shopName, shopDescription, shopLog
     const [savingNoIndex, setSavingNoIndex] = useState(false)
     const [checkingUpdate, setCheckingUpdate] = useState(false)
     const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null)
-    const themeOptions = selectedTheme === 'pink'
-        ? [...THEME_COLORS, { value: 'pink', hue: 330 }]
-        : THEME_COLORS
     const [submittingRegistry, setSubmittingRegistry] = useState(false)
     const [registryJoined, setRegistryJoined] = useState(registryOptIn)
 
@@ -440,7 +443,7 @@ export function AdminSettingsContent({ stats, shopName, shopDescription, shopLog
                 <CardContent className="space-y-4">
                     <p className="text-sm text-muted-foreground">{t('admin.settings.themeColor.hint')}</p>
                     <div className="flex flex-wrap gap-3">
-                        {themeOptions.map(({ value, hue, chroma, preview }) => {
+                        {THEME_COLORS.map(({ value, hue, chroma, preview }) => {
                             const saturation = typeof chroma === 'number' ? chroma : 1
                             const bgColor = preview || `oklch(0.55 ${0.2 * saturation} ${hue})`
                             const borderColor = selectedTheme === value
