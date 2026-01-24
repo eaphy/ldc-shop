@@ -1,177 +1,91 @@
-import { getActiveProducts, getCategories, getProductRating, getVisitorCount, getUserPendingOrders } from "@/lib/db/queries";
+import { getActiveProductCategories, getCategories, getActiveProducts, getVisitorCount, getUserPendingOrders, getSetting, getLiveCardStats } from "@/lib/db/queries";
 import { getActiveAnnouncement } from "@/actions/settings";
 import { auth } from "@/lib/auth";
 import { HomeContent } from "@/components/home-content";
+import { INFINITE_STOCK } from "@/lib/constants";
 
-export const dynamic = 'force-dynamic';
+const PAGE_SIZE = 24;
 
-export default async function Home() {
-  let products: any[] = [];
-  try {
-    products = await getActiveProducts();
-  } catch (error: any) {
-    const errorString = JSON.stringify(error);
-    const isTableMissing =
-      error.message?.includes('does not exist') ||
-      error.message?.includes('no such table') ||  // D1/SQLite error
-      error.cause?.message?.includes('does not exist') ||
-      error.cause?.message?.includes('no such table') ||  // D1/SQLite error
-      errorString.includes('42P01') || // PostgreSQL error code for undefined_table
-      errorString.includes('no such table') || // D1/SQLite in stringified error
-      errorString.includes('relation') && errorString.includes('does not exist');
+function stripMarkdown(input: string): string {
+  return input
+    .replace(/!\[.*?\]\(.*?\)/g, '')
+    .replace(/\[(.*?)\]\(.*?\)/g, '$1')
+    .replace(/[`*_>#+-]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
 
-    if (isTableMissing) {
-      console.log("Database initialized check: Table missing. Running inline migrations...");
-      const { db } = await import("@/lib/db");
-      const { sql } = await import("drizzle-orm");
+export default async function Home({
+  searchParams,
+}: {
+  searchParams?: Promise<Record<string, string | string[] | undefined>>
+}) {
+  const resolved = searchParams ? await searchParams : {}
+  const q = (typeof resolved.q === 'string' ? resolved.q : '').trim();
+  const categoryParam = (typeof resolved.category === 'string' ? resolved.category : '').trim();
+  const category = categoryParam && categoryParam !== 'all' ? categoryParam : '';
+  const sort = (typeof resolved.sort === 'string' ? resolved.sort : 'default').trim();
+  const page = Math.max(1, Number.parseInt(typeof resolved.page === 'string' ? resolved.page : '1', 10) || 1);
 
-      await db.run(sql`
-        CREATE TABLE IF NOT EXISTS products (
-          id TEXT PRIMARY KEY,
-          name TEXT NOT NULL,
-          description TEXT,
-          price TEXT NOT NULL,
-          compare_at_price TEXT,
-          category TEXT,
-          image TEXT,
-          is_hot INTEGER DEFAULT 0,
-          is_active INTEGER DEFAULT 1,
-          sort_order INTEGER DEFAULT 0,
-          purchase_limit INTEGER,
-          created_at INTEGER DEFAULT (unixepoch() * 1000)
-        );
-        CREATE TABLE IF NOT EXISTS cards (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-          card_key TEXT NOT NULL,
-          is_used INTEGER DEFAULT 0,
-          reserved_order_id TEXT,
-          reserved_at INTEGER,
-          used_at INTEGER,
-          created_at INTEGER DEFAULT (unixepoch() * 1000)
-        );
-        CREATE TABLE IF NOT EXISTS orders (
-          order_id TEXT PRIMARY KEY,
-          product_id TEXT NOT NULL,
-          product_name TEXT NOT NULL,
-          amount TEXT NOT NULL,
-          email TEXT,
-          payee TEXT,
-          status TEXT DEFAULT 'pending',
-          trade_no TEXT,
-          card_key TEXT,
-          paid_at INTEGER,
-          delivered_at INTEGER,
-          user_id TEXT,
-          username TEXT,
-          points_used INTEGER DEFAULT 0,
-          quantity INTEGER DEFAULT 1 NOT NULL,
-          current_payment_id TEXT,
-          created_at INTEGER DEFAULT (unixepoch() * 1000)
-        );
-        CREATE TABLE IF NOT EXISTS login_users (
-          user_id TEXT PRIMARY KEY,
-          username TEXT,
-          points INTEGER DEFAULT 0 NOT NULL,
-          is_blocked INTEGER DEFAULT 0,
-          created_at INTEGER DEFAULT (unixepoch() * 1000),
-          last_login_at INTEGER DEFAULT (unixepoch() * 1000)
-        );
-        CREATE TABLE IF NOT EXISTS daily_checkins (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          user_id TEXT NOT NULL REFERENCES login_users(user_id) ON DELETE CASCADE,
-          created_at INTEGER DEFAULT (unixepoch() * 1000)
-        );
-        -- Note: ALTER TABLE ADD COLUMN IF NOT EXISTS is not supported in SQLite
-        -- All columns are already defined in CREATE TABLE above
-        UPDATE cards SET is_used = 0 WHERE is_used IS NULL;
-        CREATE UNIQUE INDEX IF NOT EXISTS cards_product_id_card_key_uq ON cards(product_id, card_key);
-        -- Settings table for announcements
-        CREATE TABLE IF NOT EXISTS settings (
-          key TEXT PRIMARY KEY,
-          value TEXT,
-          updated_at INTEGER DEFAULT (unixepoch() * 1000)
-        );
-        -- Categories table
-        CREATE TABLE IF NOT EXISTS categories (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          name TEXT NOT NULL,
-          icon TEXT,
-          sort_order INTEGER DEFAULT 0,
-          created_at INTEGER DEFAULT (unixepoch() * 1000),
-          updated_at INTEGER DEFAULT (unixepoch() * 1000)
-        );
-        CREATE UNIQUE INDEX IF NOT EXISTS categories_name_uq ON categories(name);
-        -- Reviews table
-        CREATE TABLE IF NOT EXISTS reviews (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          product_id TEXT NOT NULL REFERENCES products(id) ON DELETE CASCADE,
-          order_id TEXT NOT NULL,
-          user_id TEXT NOT NULL,
-          username TEXT NOT NULL,
-          rating INTEGER NOT NULL,
-          comment TEXT,
-          created_at INTEGER DEFAULT (unixepoch() * 1000)
-        );
-        -- Refund requests
-        CREATE TABLE IF NOT EXISTS refund_requests (
-          id INTEGER PRIMARY KEY AUTOINCREMENT,
-          order_id TEXT NOT NULL,
-          user_id TEXT,
-          username TEXT,
-          reason TEXT,
-          status TEXT DEFAULT 'pending',
-          admin_username TEXT,
-          admin_note TEXT,
-          created_at INTEGER DEFAULT (unixepoch() * 1000),
-          updated_at INTEGER DEFAULT (unixepoch() * 1000),
-          processed_at INTEGER
-        );
-      `);
+  const session = await auth()
+  const isLoggedIn = !!session?.user
+  const trustLevel = Number.isFinite(Number(session?.user?.trustLevel)) ? Number(session?.user?.trustLevel) : 0
 
-      products = await getActiveProducts();
-    } else {
-      throw error;
-    }
-  }
-
-  const announcement = await getActiveAnnouncement();
-
-  // Fetch ratings for each product
-  const productsWithRatings = await Promise.all(
-    products.map(async (p) => {
-      let rating = { average: 0, count: 0 };
+  // Run all independent queries in parallel for better performance
+  const [products, announcement, visitorCount, categoryConfig, productCategories, wishlistEnabled] = await Promise.all([
+    getActiveProducts({ isLoggedIn, trustLevel }).catch(() => []),
+    getActiveAnnouncement().catch(() => null),
+    getVisitorCount().catch(() => 0),
+    getCategories().catch(() => []),
+    getActiveProductCategories({ isLoggedIn, trustLevel }).catch(() => []),
+    (async () => {
       try {
-        rating = await getProductRating(p.id);
+        return (await getSetting('wishlist_enabled')) === 'true'
       } catch {
-        // Reviews table might not exist yet
+        return false
       }
-      return {
-        ...p,
-        stockCount: p.stock + (p.locked || 0),
-        soldCount: p.sold || 0,
-        rating: rating.average,
-        reviewCount: rating.count
-      };
-    })
-  );
+    })()
+  ]);
 
-  let visitorCount = 0;
+
+  const total = products.length;
+
+  const liveStats = await getLiveCardStats(products.map((p: any) => p.id)).catch(() => new Map());
+
+  /* REMOVED: Separate ratings fetch - using pre-computed values in product table
+  const productIds = products.map((p: any) => p.id).filter(Boolean);
+  const sortedIds = [...productIds].sort();
+  let ratingsMap = new Map<string, { average: number; count: number }>();
   try {
-    visitorCount = await getVisitorCount();
+    ratingsMap = await unstable_cache(
+      async () => getProductRatings(sortedIds),
+      ["product-ratings", ...sortedIds],
+      { revalidate: CACHE_TTL_SECONDS, tags: [TAG_RATINGS] }
+    )();
   } catch {
-    visitorCount = 0;
+    // Reviews table might not exist yet
   }
+  */
 
-  let categories: any[] = []
-  try {
-    categories = await getCategories()
-  } catch {
-    categories = []
-  }
+  const productsWithRatings = products.map((p: any) => {
+    const stat = liveStats.get(p.id) || { unused: 0, available: 0, locked: 0 };
+    const available = p.isShared
+      ? (stat.unused > 0 ? INFINITE_STOCK : 0)
+      : stat.available;
+    const locked = stat.locked;
+    const stockTotal = available >= INFINITE_STOCK ? INFINITE_STOCK : (available + locked);
+    // const rating = ratingsMap.get(p.id) || { average: 0, count: 0 };
+    return {
+      ...p,
+      stockCount: stockTotal,
+      soldCount: p.sold || 0,
+      descriptionPlain: stripMarkdown(p.description || ''),
+      rating: Number(p.rating || 0),
+      reviewCount: Number(p.reviewCount || 0)
+    };
+  });
 
-  // Check for pending orders
-  const session = await auth();
+  // Check for pending orders (depends on session)
   let pendingOrders: any[] = [];
   if (session?.user?.id) {
     try {
@@ -181,11 +95,21 @@ export default async function Home() {
     }
   }
 
+  const categoryNames = categoryConfig
+    .sort((a, b) => (a.sortOrder || 0) - (b.sortOrder || 0))
+    .map((c) => c.name);
+  const extraCategories = productCategories.filter((c) => !categoryNames.includes(c)).sort();
+  const categories = [...categoryNames, ...extraCategories];
+
   return <HomeContent
     products={productsWithRatings}
     announcement={announcement}
     visitorCount={visitorCount}
     categories={categories}
+    categoryConfig={categoryConfig}
     pendingOrders={pendingOrders}
+    wishlistEnabled={wishlistEnabled}
+    filters={{ q, category: category || null, sort }}
+    pagination={{ page, pageSize: PAGE_SIZE, total }}
   />;
 }

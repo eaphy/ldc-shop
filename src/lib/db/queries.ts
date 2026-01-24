@@ -103,6 +103,7 @@ export async function getProduct(id: string) {
             image: products.image,
             category: products.category,
             isHot: products.isHot,
+            isActive: products.isActive,
             purchaseLimit: products.purchaseLimit,
             stock: sql<number>`count(case when ${cards.id} IS NOT NULL AND COALESCE(${cards.isUsed}, false) = false AND (${cards.reservedAt} IS NULL OR ${cards.reservedAt} < NOW() - INTERVAL '5 minutes') then 1 end):: int`,
             locked: sql<number>`count(case when ${cards.id} IS NOT NULL AND COALESCE(${cards.isUsed}, false) = false AND (${cards.reservedAt} >= NOW() - INTERVAL '5 minutes') then 1 end):: int`
@@ -112,7 +113,12 @@ export async function getProduct(id: string) {
             .where(eq(products.id, id))
             .groupBy(products.id);
 
-        return result[0];
+        // Return null if product doesn't exist or is inactive
+        const product = result[0];
+        if (!product || product.isActive === false) {
+            return null;
+        }
+        return product;
     })
 }
 
