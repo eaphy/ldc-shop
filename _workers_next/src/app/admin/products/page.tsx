@@ -1,15 +1,10 @@
-import { cleanupExpiredCardsIfNeeded, getProducts, getSetting, getLiveCardStats } from "@/lib/db/queries"
+import { getProducts, getSetting, getLiveCardStats } from "@/lib/db/queries"
 import { cookies } from "next/headers"
 import { AdminProductsContent } from "@/components/admin/products-content"
 import { INFINITE_STOCK } from "@/lib/constants"
 
 export default async function AdminPage() {
     await cookies()
-    try {
-        await cleanupExpiredCardsIfNeeded()
-    } catch {
-        // best effort
-    }
     const [products, lowStockThreshold] = await Promise.all([
         getProducts(),
         (async () => {
@@ -42,7 +37,9 @@ export default async function AdminPage() {
                 stockCount,
                 isActive: p.isActive ?? true,
                 isHot: p.isHot ?? false,
-                sortOrder: p.sortOrder ?? 0
+                sortOrder: p.sortOrder ?? 0,
+                variantGroupId: p.variantGroupId ?? null,
+                variantLabel: p.variantLabel ?? null
             }})}
             lowStockThreshold={lowStockThreshold}
         />

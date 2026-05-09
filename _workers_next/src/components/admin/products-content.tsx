@@ -10,6 +10,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Badge } from "@/components/ui/badge"
 import { Plus, Eye, EyeOff, ArrowUp, ArrowDown } from "lucide-react"
 import { deleteProduct, toggleProductStatus, reorderProduct } from "@/actions/admin"
+import { INFINITE_STOCK } from "@/lib/constants"
 import { toast } from "sonner"
 
 interface Product {
@@ -22,6 +23,8 @@ interface Product {
     isActive: boolean
     isHot: boolean
     sortOrder: number
+    variantGroupId?: string | null
+    variantLabel?: string | null
 }
 
 interface AdminProductsContentProps {
@@ -150,7 +153,16 @@ export function AdminProductsContent({ products, lowStockThreshold }: AdminProdu
                                     </Button>
                                 </div>
                                 </TableCell>
-                                <TableCell className="font-medium">{product.name}</TableCell>
+                                <TableCell className="font-medium">
+                                    <div className="flex flex-col gap-1">
+                                        <span>{product.name}</span>
+                                        {(product.variantGroupId || product.variantLabel) && (
+                                            <span className="text-xs text-muted-foreground">
+                                                {[product.variantGroupId, product.variantLabel].filter(Boolean).join(" · ")}
+                                            </span>
+                                        )}
+                                    </div>
+                                </TableCell>
                                 <TableCell>
                                     <div className="flex items-center gap-2">
                                         <span>{Number(product.price)}</span>
@@ -171,7 +183,7 @@ export function AdminProductsContent({ products, lowStockThreshold }: AdminProdu
                                 </TableCell>
                                 <TableCell>
                                     <div className="flex items-center gap-2">
-                                        <span>{product.stockCount}</span>
+                                        <span>{product.stockCount >= INFINITE_STOCK ? "∞" : product.stockCount}</span>
                                         {product.stockCount <= threshold && (
                                             <Badge variant="destructive" className="text-[10px]">{t('admin.products.lowStock')}</Badge>
                                         )}

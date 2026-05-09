@@ -3,8 +3,9 @@
 import { createContext, useContext, useState, useEffect, ReactNode } from 'react'
 import en from '@/locales/en.json'
 import zh from '@/locales/zh.json'
+import { isLocale, type Locale } from './shared'
+import { resolveCurrencyUnit } from '@/lib/currency-unit'
 
-type Locale = 'en' | 'zh'
 type Translations = typeof en
 
 const translations: Record<Locale, Translations> = { en, zh }
@@ -28,29 +29,28 @@ function interpolate(text: string, params?: Record<string, string | number>): st
     }, text)
 }
 
-export function I18nProvider({ children }: { children: ReactNode }) {
-    const [locale, setLocaleState] = useState<Locale>('en')
-    const [mounted, setMounted] = useState(false)
+export function I18nProvider({
+    children,
+    initialLocale = 'en',
+    currencyUnit = null,
+}: {
+    children: ReactNode
+    initialLocale?: Locale
+    currencyUnit?: string | null
+}) {
+    const [locale, setLocaleState] = useState<Locale>(initialLocale)
 
     useEffect(() => {
-        setMounted(true)
-        // Check localStorage first
-        const saved = localStorage.getItem('ldc-locale') as Locale | null
-        if (saved && translations[saved]) {
-            setLocaleState(saved)
-            document.cookie = `ldc-locale=${saved}; path=/; max-age=31536000`
+        const saved = localStorage.getItem('ldc-locale')
+        const resolved = isLocale(saved) ? saved : initialLocale
+
+        if (resolved !== locale) {
+            setLocaleState(resolved)
             return
         }
-        // Detect from browser
-        const browserLang = navigator.language.toLowerCase()
-        if (browserLang.startsWith('zh')) {
-            setLocaleState('zh')
-            document.cookie = `ldc-locale=zh; path=/; max-age=31536000`
-        } else {
-            setLocaleState('en')
-            document.cookie = `ldc-locale=en; path=/; max-age=31536000`
-        }
-    }, [])
+        localStorage.setItem('ldc-locale', resolved)
+        document.cookie = `ldc-locale=${resolved}; path=/; max-age=31536000`
+    }, [initialLocale, locale])
 
     const setLocale = (newLocale: Locale) => {
         setLocaleState(newLocale)
@@ -60,7 +60,7 @@ export function I18nProvider({ children }: { children: ReactNode }) {
 
     const t = (key: string, params?: Record<string, string | number>): string => {
         const text = getNestedValue(translations[locale], key)
-        return interpolate(text, params)
+        return interpolate(text, { currencyUnit: resolveCurrencyUnit(locale, currencyUnit), ...params })
     }
 
     return (
@@ -79,7 +79,7 @@ export function useI18n() {
             setLocale: () => { },
             t: (key: string, params?: Record<string, string | number>) => {
                 const text = getNestedValue(en, key)
-                return interpolate(text, params)
+                return interpolate(text, { currencyUnit: resolveCurrencyUnit('en', null), ...params })
             }
         }
     }

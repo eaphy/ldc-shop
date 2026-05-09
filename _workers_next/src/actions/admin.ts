@@ -2,13 +2,24 @@
 
 import { auth } from "@/lib/auth"
 import { db } from "@/lib/db"
-import { products, cards, reviews, categories } from "@/lib/db/schema"
+import { products, cards, reviews, reviewReplies, categories } from "@/lib/db/schema"
 import { eq, sql, inArray, and, or, isNull, lte } from "drizzle-orm"
-import { sendTelegramMessage } from "@/lib/notifications"
+import { sendBarkMessage, sendTelegramMessage } from "@/lib/notifications"
 import { revalidatePath, updateTag } from "next/cache"
 import { setSetting, getSetting, recalcProductAggregates, recalcProductAggregatesForMany, getProductForAdmin } from "@/lib/db/queries"
 import { isAdminUsername } from "@/lib/admin-auth"
+import { getProductCardApiConfig, pullOneCardFromApi, saveProductCardApiConfig } from "@/lib/card-api"
 import { unstable_noStore } from "next/cache"
+import { isThemeFont } from "@/lib/theme-fonts"
+import { normalizeCurrencyUnit } from "@/lib/currency-unit"
+import {
+    PRODUCT_GALLERY_MAX_ITEMS,
+    PRODUCT_GALLERY_MAX_JSON_LENGTH,
+    normalizeProductImageRefs,
+    parseStoredProductImages,
+    splitProductImageGallery,
+    validateProductImageRef,
+} from "@/lib/product-images"
 
 export async function checkAdmin() {
     const session = await auth()
@@ -44,16 +55,48 @@ export async function saveProduct(formData: FormData) {
     const price = formData.get('price') as string
     const compareAtPrice = (formData.get('compareAtPrice') as string | null) || null
     const category = formData.get('category') as string
-    const image = formData.get('image') as string
+    const image = (formData.get('image') as string || '').trim()
+    const productImagesRaw = (formData.get('productImages') as string | null)?.trim() || null
     const purchaseLimit = formData.get('purchaseLimit') ? parseInt(formData.get('purchaseLimit') as string) : null
     const isHot = formData.get('isHot') === 'on'
     const isShared = formData.get('isShared') === 'on'
     const purchaseWarning = (formData.get('purchaseWarning') as string | null)?.trim() || null
     const visibilityLevelRaw = (formData.get('visibilityLevel') as string | null)?.trim() ?? ''
+    const variantGroupId = (formData.get('variantGroupId') as string | null)?.trim() || null
+    const variantLabel = (formData.get('variantLabel') as string | null)?.trim() || null
+    const purchaseQuestionsRaw = (formData.get('purchaseQuestions') as string | null)?.trim() || null
+    let purchaseQuestions: string | null = null
+    if (purchaseQuestionsRaw) {
+        try {
+            const parsed = JSON.parse(purchaseQuestionsRaw)
+            if (Array.isArray(parsed)) {
+                const valid = parsed.filter((item: any) => item && typeof item.q === 'string' && item.q.trim() && typeof item.a === 'string' && item.a.trim())
+                purchaseQuestions = valid.length > 0 ? JSON.stringify(valid.map((item: any) => ({ q: item.q.trim(), a: item.a.trim() }))) : null
+            }
+        } catch {
+            // ignore invalid JSON
+        }
+    }
     const parsedVisibility = Number.parseInt(visibilityLevelRaw, 10)
     const visibilityLevel = Number.isFinite(parsedVisibility) ? parsedVisibility : -1
     if (![ -1, 0, 1, 2, 3 ].includes(visibilityLevel)) {
         throw new Error("Invalid visibility level")
+    }
+    const submittedGallery = normalizeProductImageRefs([image, ...parseStoredProductImages(productImagesRaw)])
+    if (submittedGallery.length > PRODUCT_GALLERY_MAX_ITEMS) {
+        throw new Error(`Product gallery supports up to ${PRODUCT_GALLERY_MAX_ITEMS} images`)
+    }
+    for (const [index, galleryImage] of submittedGallery.entries()) {
+        validateProductImageRef(galleryImage, index === 0 ? "Product image" : `Product gallery image ${index}`)
+    }
+
+    const {
+        primaryImage,
+        additionalImagesJson,
+    } = splitProductImageGallery(image, productImagesRaw)
+
+    if (additionalImagesJson && additionalImagesJson.length > PRODUCT_GALLERY_MAX_JSON_LENGTH) {
+        throw new Error("Additional product images are too large")
     }
 
     const doSave = async () => {
@@ -74,12 +117,16 @@ export async function saveProduct(formData: FormData) {
             price,
             compareAtPrice: compareAtPrice && compareAtPrice !== '0' ? compareAtPrice : null,
             category,
-            image,
+            image: primaryImage,
+            productImages: additionalImagesJson,
             purchaseLimit,
             purchaseWarning,
             isHot,
             isShared,
-            visibilityLevel
+            visibilityLevel,
+            variantGroupId,
+            variantLabel,
+            purchaseQuestions
         }).onConflictDoUpdate({
             target: products.id,
             set: {
@@ -88,12 +135,16 @@ export async function saveProduct(formData: FormData) {
                 price,
                 compareAtPrice: compareAtPrice && compareAtPrice !== '0' ? compareAtPrice : null,
                 category,
-                image,
+                image: primaryImage,
+                productImages: additionalImagesJson,
                 purchaseLimit,
                 purchaseWarning,
                 isHot,
                 isShared,
-                visibilityLevel
+                visibilityLevel,
+                variantGroupId,
+                variantLabel,
+                purchaseQuestions
             }
         })
     }
@@ -114,6 +165,9 @@ export async function saveProduct(formData: FormData) {
         } catch { /* column exists */ }
         try {
             await db.run(sql.raw(`ALTER TABLE products ADD COLUMN visibility_level INTEGER DEFAULT -1`));
+        } catch { /* column exists */ }
+        try {
+            await db.run(sql.raw(`ALTER TABLE products ADD COLUMN product_images TEXT`));
         } catch { /* column exists */ }
     }
 
@@ -322,6 +376,163 @@ export async function deleteCards(cardIds: number[]) {
     updateTag('home:product-categories')
 }
 
+export async function saveCardsApiConfig(productId: string, apiUrl: string, apiToken: string, enabled: boolean) {
+    await checkAdmin()
+
+    const id = String(productId || "").trim()
+    if (!id) throw new Error("Invalid product id")
+
+    const url = String(apiUrl || "").trim()
+    const token = String(apiToken || "").trim()
+    const safeEnabled = !!enabled
+
+    if (safeEnabled && !url) {
+        throw new Error("API URL is required")
+    }
+
+    if (url.length > 1000) {
+        throw new Error("API URL is too long")
+    }
+    if (token.length > 1000) {
+        throw new Error("API token is too long")
+    }
+
+    if (url) {
+        try {
+            // Validate URL format early to avoid runtime fetch failures.
+            void new URL(url)
+        } catch {
+            throw new Error("Invalid API URL")
+        }
+    }
+
+    await saveProductCardApiConfig(id, {
+        enabled: safeEnabled,
+        url,
+        token,
+    })
+
+    let autoPulled = false
+    let autoPullError: string | null = null
+    if (safeEnabled && url) {
+        const pullResult = await pullOneCardFromApi(id)
+        if (pullResult.ok) {
+            autoPulled = true
+            try {
+                await recalcProductAggregates(id)
+            } catch {
+                // best effort
+            }
+        } else if (!pullResult.skipped) {
+            autoPullError = pullResult.error || "api_pull_failed"
+        }
+    }
+
+    revalidatePath(`/admin/cards/${id}`)
+    revalidatePath('/admin/products')
+    revalidatePath('/admin/settings')
+    revalidatePath('/')
+    updateTag('home:products')
+    updateTag('home:product-categories')
+
+    return {
+        success: true,
+        autoPulled,
+        autoPullError,
+    }
+}
+
+export async function setCardsApiEnabled(
+    productId: string,
+    enabled: boolean,
+    apiUrl?: string,
+    apiToken?: string
+) {
+    await checkAdmin()
+
+    const id = String(productId || "").trim()
+    if (!id) throw new Error("Invalid product id")
+
+    const current = await getProductCardApiConfig(id)
+    const nextUrl = typeof apiUrl === "string" ? apiUrl.trim() : current.url
+    const nextToken = typeof apiToken === "string" ? apiToken.trim() : current.token
+
+    if (nextUrl.length > 1000) {
+        throw new Error("API URL is too long")
+    }
+    if (nextToken.length > 1000) {
+        throw new Error("API token is too long")
+    }
+    if (nextUrl) {
+        try {
+            void new URL(nextUrl)
+        } catch {
+            throw new Error("Invalid API URL")
+        }
+    }
+
+    if (enabled && !nextUrl) {
+        throw new Error("API URL is required")
+    }
+
+    await saveProductCardApiConfig(id, {
+        enabled,
+        url: nextUrl,
+        token: nextToken,
+    })
+
+    let autoPulled = false
+    let autoPullError: string | null = null
+    if (enabled && nextUrl) {
+        const pullResult = await pullOneCardFromApi(id)
+        if (pullResult.ok) {
+            autoPulled = true
+            try {
+                await recalcProductAggregates(id)
+            } catch {
+                // best effort
+            }
+        } else if (!pullResult.skipped) {
+            autoPullError = pullResult.error || "api_pull_failed"
+        }
+    }
+
+    revalidatePath(`/admin/cards/${id}`)
+    revalidatePath('/admin/products')
+    revalidatePath('/admin/settings')
+    revalidatePath('/')
+    updateTag('home:products')
+    updateTag('home:product-categories')
+
+    return { success: true, autoPulled, autoPullError }
+}
+
+export async function pullCardFromApi(productId: string) {
+    await checkAdmin()
+    const id = String(productId || "").trim()
+    if (!id) throw new Error("Invalid product id")
+
+    const result = await pullOneCardFromApi(id)
+    if (!result.ok) {
+        throw new Error(result.error || "api_pull_failed")
+    }
+
+    try {
+        await recalcProductAggregates(id)
+    } catch {
+        // best effort
+    }
+
+    revalidatePath(`/admin/cards/${id}`)
+    revalidatePath('/admin/products')
+    revalidatePath('/admin/settings')
+    revalidatePath('/')
+    updateTag('home:products')
+    updateTag('home:product-categories')
+
+    return { success: true, cardKey: result.cardKey || null }
+}
+
 export async function saveShopName(rawName: string) {
     await checkAdmin()
 
@@ -380,11 +591,19 @@ export async function saveShopLogo(logoUrl: string) {
     await checkAdmin()
 
     const url = logoUrl.trim()
-    if (url && url.length > 500) {
+    if (url.startsWith('data:')) {
+        if (!url.startsWith('data:image/')) {
+            throw new Error("Only image data URLs are allowed")
+        }
+        if (url.length > 1_000_000) {
+            throw new Error("Logo image is too large")
+        }
+    } else if (url && url.length > 500) {
         throw new Error("Logo URL is too long")
     }
 
     await setSetting('shop_logo', url)
+    await setSetting('shop_logo_source', url ? 'custom' : 'generated')
     await setSetting('shop_logo_updated_at', String(Date.now()))
     revalidatePath('/')
     revalidatePath('/admin/products')
@@ -402,9 +621,42 @@ export async function saveRefundReclaimCards(enabled: boolean) {
 
 export async function deleteReview(reviewId: number) {
     await checkAdmin()
+    const existing = await db.select({
+        productId: reviews.productId,
+    }).from(reviews).where(eq(reviews.id, reviewId)).limit(1)
+
     await db.delete(reviews).where(eq(reviews.id, reviewId))
+
+    const productId = existing[0]?.productId
+    if (productId) {
+        await recalcProductAggregates(productId)
+        revalidatePath(`/buy/${productId}`)
+    }
+
     revalidatePath('/admin/reviews')
     updateTag('home:ratings')
+    updateTag('home:products')
+    revalidatePath('/')
+}
+
+export async function deleteReviewReply(replyId: number) {
+    await checkAdmin()
+    const existing = await db.select({
+        productId: reviews.productId,
+    })
+        .from(reviewReplies)
+        .leftJoin(reviews, eq(reviewReplies.reviewId, reviews.id))
+        .where(eq(reviewReplies.id, replyId))
+        .limit(1)
+
+    await db.delete(reviewReplies).where(eq(reviewReplies.id, replyId))
+
+    const productId = existing[0]?.productId
+    if (productId) {
+        revalidatePath(`/buy/${productId}`)
+    }
+
+    revalidatePath('/admin/reviews')
     revalidatePath('/')
 }
 
@@ -482,6 +734,21 @@ export async function saveShopFooter(footer: string) {
     updateTag('home:product-categories')
 }
 
+export async function saveCurrencyUnit(rawCurrencyUnit: string) {
+    await checkAdmin()
+
+    const currencyUnit = normalizeCurrencyUnit(rawCurrencyUnit) || ''
+    if (currencyUnit.length > 20) {
+        throw new Error("Currency unit is too long")
+    }
+
+    await setSetting('currency_unit', currencyUnit)
+    revalidatePath('/admin/settings')
+    revalidatePath('/')
+    updateTag('home:products')
+    updateTag('home:product-categories')
+}
+
 const VALID_THEME_COLORS = ['purple', 'indigo', 'blue', 'cyan', 'teal', 'green', 'lime', 'amber', 'orange', 'red', 'rose', 'pink', 'black']
 
 export async function saveThemeColor(color: string) {
@@ -498,22 +765,58 @@ export async function saveThemeColor(color: string) {
     updateTag('home:product-categories')
 }
 
+export async function saveThemeFont(font: string) {
+    await checkAdmin()
+
+    if (!isThemeFont(font)) {
+        throw new Error("Invalid theme font")
+    }
+
+    await setSetting('theme_font', font)
+    revalidatePath('/admin/settings')
+    revalidatePath('/')
+    updateTag('home:products')
+    updateTag('home:product-categories')
+}
+
 export async function saveNotificationSettings(formData: FormData) {
     await checkAdmin()
+
+    const parseBooleanField = (key: string) => {
+        const values = formData.getAll(key).map(v => String(v).toLowerCase())
+        if (values.some(v => v === 'true' || v === 'on' || v === '1')) {
+            return true
+        }
+        if (values.some(v => v === 'false' || v === 'off' || v === '0')) {
+            return false
+        }
+        return false
+    }
 
     const token = (formData.get('telegramBotToken') as string || '').trim()
     const chatId = (formData.get('telegramChatId') as string || '').trim()
     const language = (formData.get('telegramLanguage') as string || 'zh').trim()
+    const telegramEnabled = parseBooleanField('telegramEnabled')
 
     await setSetting('telegram_bot_token', token)
     await setSetting('telegram_chat_id', chatId)
     await setSetting('telegram_language', language)
+    await setSetting('telegram_enabled', telegramEnabled ? 'true' : 'false')
+
+    // Bark settings
+    const barkEnabled = parseBooleanField('barkEnabled')
+    const barkServerUrl = (formData.get('barkServerUrl') as string || '').trim()
+    const barkDeviceKey = (formData.get('barkDeviceKey') as string || '').trim()
+
+    await setSetting('bark_enabled', barkEnabled ? 'true' : 'false')
+    await setSetting('bark_server_url', barkServerUrl || 'https://api.day.app')
+    await setSetting('bark_device_key', barkDeviceKey)
 
     // Email settings
     const resendApiKey = (formData.get('resendApiKey') as string || '').trim()
     const resendFromEmail = (formData.get('resendFromEmail') as string || '').trim()
     const resendFromName = (formData.get('resendFromName') as string || '').trim()
-    const resendEnabled = formData.get('resendEnabled') === 'true'
+    const resendEnabled = parseBooleanField('resendEnabled')
     const emailLanguageRaw = (formData.get('emailLanguage') as string || '').trim()
     const emailLanguage = emailLanguageRaw === 'en' ? 'en' : 'zh'
 
@@ -523,12 +826,32 @@ export async function saveNotificationSettings(formData: FormData) {
     await setSetting('resend_enabled', resendEnabled ? 'true' : 'false')
     await setSetting('email_language', emailLanguage)
 
-    revalidatePath('/admin/notifications')
+    return {
+        telegramBotToken: token,
+        telegramChatId: chatId,
+        telegramLanguage: language || 'zh',
+        telegramEnabled,
+        barkEnabled,
+        barkServerUrl: barkServerUrl || 'https://api.day.app',
+        barkDeviceKey,
+        resendApiKey,
+        resendFromEmail,
+        resendFromName,
+        resendEnabled,
+        emailLanguage
+    }
 }
 
 export async function testNotification() {
     await checkAdmin()
     return await sendTelegramMessage("🔔 Test notification from LDC Shop")
+}
+
+export async function testBarkNotification() {
+    await checkAdmin()
+    return await sendBarkMessage("🔔 Test notification from LDC Shop", "This is a test message from LDC Shop", {
+        group: 'LDC Shop'
+    })
 }
 
 export async function testEmailNotification(to: string) {

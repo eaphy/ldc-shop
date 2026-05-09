@@ -1,19 +1,20 @@
 import { db } from "@/lib/db"
 import { cards } from "@/lib/db/schema"
 import { desc, sql } from "drizzle-orm"
-import { cleanupExpiredCardsIfNeeded, getProductForAdmin } from "@/lib/db/queries"
+import { getProductForAdmin } from "@/lib/db/queries"
 import { notFound } from "next/navigation"
 import { CardsContent } from "@/components/admin/cards-content"
+import { getProductCardApiConfig } from "@/lib/card-api"
 
 export default async function CardsPage({ params }: { params: Promise<{ id: string }> }) {
     const { id } = await params
     const product = await getProductForAdmin(id)
     if (!product) return notFound()
+    const apiConfig = await getProductCardApiConfig(id)
 
     // Get Unused Cards
     let unusedCards: any[] = []
     try {
-        await cleanupExpiredCardsIfNeeded(undefined, id)
         unusedCards = await db.select()
             .from(cards)
             .where(sql`${cards.productId} = ${id} AND COALESCE(${cards.isUsed}, 0) = 0 AND (${cards.expiresAt} IS NULL OR ${cards.expiresAt} > ${Date.now()}) AND (${cards.reservedAt} IS NULL OR ${cards.reservedAt} < ${Date.now() - 60000})`)
@@ -55,6 +56,7 @@ export default async function CardsPage({ params }: { params: Promise<{ id: stri
             productId={id}
             productName={product.name}
             unusedCards={unusedCards.map((c: any) => ({ id: c.id, cardKey: c.cardKey }))}
+            apiConfig={apiConfig}
         />
     )
 }
